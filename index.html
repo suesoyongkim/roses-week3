@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>ROSES — Interactive Experience</title>
+  <meta name="description" content="Roses, an interactive audiovisual collage.">
+  <!-- SG Rhizoma Engine by Sativus Gourd, adapted from Rhizoma by Dabin Kim (CC BY-SA 4.0) -->
+  <script src="https://sativus-gourd.github.io/rhizoma-smoke/embed/sg-rhizoma.js?v=20261031" defer></script>
+  <script src="assets/manifest.js" onerror="void 0"></script>
+  <style>
+    :root { font-family:Arial,Helvetica,sans-serif; font-synthesis:none; }
+    *,*::before,*::after { box-sizing:border-box }
+    html,body { width:100%;height:100%;margin:0;overflow:hidden }
+    body { background:#000;color:#fff }
+    button { font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent }
+    button:focus-visible { outline:2px solid currentColor;outline-offset:4px }
+    [hidden] { display:none!important }
+
+    .entry { position:fixed;inset:0;z-index:40;display:grid;place-items:center;
+      overflow:hidden;background:#000;color:#fff;transition:opacity .8s ease,visibility .8s ease }
+    .entry.leaving { opacity:0;visibility:hidden;pointer-events:none }
+    .entry-center { position:relative;width:100%;height:100%;display:grid;place-items:center }
+    /* The current Rhizoma field engine owns the full screen, not an extra hand-drawn canvas */
+    .entry-title { position:absolute;inset:0;z-index:1;margin:0;padding:0;
+      display:grid;place-items:center;width:100%;height:100%;
+      background:#000;color:#fff;font-family:Georgia,'Times New Roman',serif;
+      font-weight:400;font-size:clamp(34px,6vw,84px);line-height:1.12;
+      text-align:center;letter-spacing:-.087em;white-space:nowrap;pointer-events:none;
+      user-select:none;-webkit-user-select:none }
+    .entry-center::after { content:"";position:absolute;inset:0;z-index:3;
+      background:#000;pointer-events:none;opacity:0;animation:entry-reveal 1.8s ease-out both }
+    @keyframes entry-reveal { from {opacity:1} to {opacity:0} }
+    .entry-hit { position:absolute;inset:0;z-index:5;border:0;background:transparent;color:#fff }
+    .entry-hit:focus-visible { outline:2px solid #fff;outline-offset:-13px }
+
+    /* Keep the entire viewport filled, including while image files are loading */
+    .experience { position:fixed;inset:0;overflow:hidden;background:#171717;color:#fff;
+      opacity:0;pointer-events:none;transition:opacity .85s ease }
+    .experience.visible { opacity:1;pointer-events:auto }
+    .viewport { position:absolute;inset:0;overflow:hidden;cursor:grab;
+      touch-action:none;user-select:none;-webkit-user-select:none }
+    .viewport.dragging { cursor:grabbing }
+    .stage { position:absolute;inset:0;overflow:hidden;pointer-events:none }
+    .tile { position:absolute;z-index:1;display:block;margin:0;padding:0;border:0;background:#202020;
+      overflow:hidden;pointer-events:auto;transform:translate3d(0,-50%,0) scale(1);
+      transform-origin:center center;transition:transform .27s cubic-bezier(.2,.7,.2,1);
+      outline-offset:5px;cursor:grab;will-change:transform }
+    .tile.photo:hover,.tile.photo:focus-visible { z-index:1000!important;transform:translate3d(0,-50%,0) scale(1.075) }
+    .tile.interview:hover,.tile.interview:focus-visible { transform:translate3d(0,-50%,0) scale(1); }
+    .tile img,.tile video { display:block;width:100%;height:100%;object-fit:cover;
+      pointer-events:none;-webkit-user-drag:none }
+    /* All media retain intrinsic proportions; neighboring images can overlap and the viewport clips the edges */
+    /* A continuous base mosaic always occupies every pixel; photo pixels fade in as they arrive */
+    .tile.photo { background:#242424 }
+    .tile.photo img { object-fit:fill;opacity:0;transition:opacity .25s ease }
+    .tile.photo.is-loaded img { opacity:1 }
+    .tile.photo.is-failed { background:#242424 }
+    .tile.photo.is-failed img { display:none }
+    /* Interviews stay in place: hovering changes the audio, not the collage geometry. */
+    .tile.interview { cursor:default }
+    .tile.interview video { background:#111;object-fit:fill }
+    .tile.interview:focus-visible { outline:2px solid #111;outline-offset:3px }
+    .instructions { position:absolute;z-index:6;bottom:clamp(18px,3vw,40px);
+      left:clamp(18px,3vw,40px);pointer-events:none;
+      font-size:10px;letter-spacing:.18em;color:#fff;mix-blend-mode:difference }
+    .more-trigger { position:absolute;z-index:2001;bottom:calc(clamp(18px,3vw,40px) - 12px);
+      right:clamp(18px,3vw,40px);min-height:36px;padding:0 17px;
+      border:1px solid rgba(255,255,255,.95);background:rgba(0,0,0,.16);color:#fff;
+      font-size:11px;font-weight:600;letter-spacing:.16em;
+      text-shadow:0 1px 3px rgba(0,0,0,.32);
+      transition:background .2s ease,border-color .2s ease }
+    .more-trigger:hover,.more-trigger:focus-visible { background:rgba(0,0,0,.38);border-color:#fff }
+    /* Keep MORE as a single outlined rectangle: suppress the extra keyboard focus ring */
+    .more-trigger:focus-visible { outline:none;box-shadow:none;background:rgba(0,0,0,.38) }
+    .more-overlay { position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.77);
+      color:#fff;opacity:0;visibility:hidden;pointer-events:none;
+      backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+      transition:opacity .35s ease,visibility .35s ease;overflow-y:auto;overscroll-behavior:contain }
+    .more-overlay.is-open { opacity:1;visibility:visible;pointer-events:auto }
+    .more-inner { width:100%;min-height:100%;display:flex;flex-direction:column;
+      justify-content:space-between;align-items:center;padding:clamp(22px,3vw,48px);
+      padding-bottom:max(clamp(22px,3vw,48px),env(safe-area-inset-bottom)) }
+    /* Accessible close control stays available to keyboard users without a visible header */
+    .more-close { position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+      overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0 }
+    .more-center { flex:1;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;gap:clamp(15px,3.5vh,36px);padding:48px 0 }
+    .more-link { font-family:Arial,Helvetica,sans-serif;font-size:clamp(36px,6.4vw,94px);
+      font-weight:400;line-height:1.05;letter-spacing:-.045em;text-decoration:none;
+      color:#fff;transition:opacity .2s ease }
+    .more-link[href]:hover,.more-link[href]:focus-visible { opacity:.48 }
+    .more-link[aria-disabled="true"] { cursor:default }
+    .more-credits { width:100%;text-align:center;line-height:1.25;
+      color:rgba(255,255,255,.73);font-size:11px;letter-spacing:.04em }
+    .more-credits p { margin:0 }
+    .more-credits p + p { margin-top:0 }
+    .asset-warning { position:absolute;z-index:8;left:50%;top:50%;transform:translate(-50%,-50%);
+      max-width:min(88vw,510px);padding:18px 22px;text-align:center;
+      font-size:12px;line-height:1.9;color:#555;background:#fff;border:1px solid #eee }
+    .asset-warning code { font-family:monospace;color:#222 }
+
+    @media (max-width:760px) {
+      .entry-title { font-size:clamp(28px,8vw,52px) }
+      .instructions { font-size:9px;max-width:56% }
+      .more-trigger { font-size:10px;min-height:34px;padding:0 13px;bottom:calc(clamp(18px,3vw,40px) - 11px) }
+      .more-inner { padding:20px 18px max(24px,env(safe-area-inset-bottom)) }
+      .more-link { font-size:clamp(35px,11vw,65px) }
+      .more-credits { font-size:10px }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .entry,.experience,.tile,.more-overlay { transition:none!important }
+      .entry-center::after { animation:none;opacity:0 }
+    }
+  </style>
+</head>
+<body>
+  <section class="entry" id="entry" aria-label="Roses opening">
+    <div class="entry-center">
+      <h1 class="entry-title" id="rosesTitle">ROSES</h1>
+      <button class="entry-hit" id="enter" aria-label="Enter Roses experience" type="button"></button>
+    </div>
+  </section>
+
+  <main class="experience" id="experience" aria-label="Roses audiovisual collage" inert>
+    <div class="viewport" id="viewport" tabindex="0" aria-label="Horizontal infinite gallery. Scroll, drag, or press the left and right arrow keys to explore">
+      <div class="stage" id="stage"></div>
+    </div>
+    <div class="instructions">SCROLL / DRAG / ← → TO EXPLORE</div>
+    <button class="more-trigger" id="moreButton" type="button" aria-haspopup="dialog"
+      aria-controls="moreOverlay" aria-expanded="false">MORE</button>
+    <div class="asset-warning" id="assetWarning" hidden></div>
+  </main>
+
+  <section class="more-overlay" id="moreOverlay" role="dialog" aria-modal="true"
+    aria-label="ROSES links and credits" aria-hidden="true" hidden>
+    <div class="more-inner">
+      <button class="more-close" id="moreClose" type="button" aria-label="Close MORE menu">Close menu</button>
+      <nav class="more-center" aria-label="External profiles">
+        <a class="more-link" id="linkInstagram" aria-disabled="true">INSTAGRAM</a>
+        <a class="more-link" id="linkYoutube" aria-disabled="true">YOUTUBE</a>
+        <a class="more-link" id="linkSpotify" aria-disabled="true">SPOTIFY</a>
+      </nav>
+      <!-- ROSES project credits — no visible CREDITS heading -->
+      <footer class="more-credits" id="moreCredits">
+        <p>ROSES</p>
+        <p>Art Direction: miko Johannes bwalya ruis (@sativus.gourd)</p>
+        <p>Website Design &amp; Development: Soyong Kim (@s.oyongkim)</p>
+      </footer>
+    </div>
+  </section>
+
+  <audio id="soundtrack" src="assets/audio/roses.wav" preload="metadata" loop></audio>
+
+  <script>
+  // Set the artist's official URLs here to activate links in the MORE overlay
+  window.ROSES_SOCIALS = {
+    instagram: '', // https://www.instagram.com/...
+    youtube: '',   // https://www.youtube.com/@...
+    spotify: ''    // https://open.spotify.com/artist/...
+  };
+  (() => {
+    'use strict';
+    const get = id => document.getElementById(id);
+    const entry = get('entry'), title = get('rosesTitle'), enter = get('enter');
+    const experience = get('experience'), viewport = get('viewport'), stage = get('stage');
+    const soundtrack = get('soundtrack');
+    const assetWarning = get('assetWarning');
+    const moreButton=get('moreButton'),moreOverlay=get('moreOverlay'),moreClose=get('moreClose');
+    let moreOpen=false,moreHideTimer=null;
+    for (const [network,id] of [['instagram','linkInstagram'],['youtube','linkYoutube'],['spotify','linkSpotify']]) {
+      const url=window.ROSES_SOCIALS?.[network];
+      const link=get(id);
+      if(typeof url==='string' && /^https:\/\//i.test(url.trim())) {
+        link.href=url.trim();link.target='_blank';link.rel='noopener noreferrer';
+        link.removeAttribute('aria-disabled');
+      } else {
+        link.title='Profile URL not added yet';
+        link.setAttribute('aria-disabled','true');
+      }
+    }
+    const prefersLessMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const canHover = matchMedia('(hover: hover) and (pointer: fine)').matches;
+    const MUSIC_VOLUME = 0.85;
+    const DUCKED_VOLUME = 0.08; // Roses stays quietly underneath an interview.
+    const INTERVIEW_VOLUME = 1;
+
+    const custom = window.ROSES_MEDIA || {};
+    const photos = Array.isArray(custom.images) && custom.images.length
+      ? custom.images : Array.from({length:120},(_,i)=>`Frame-${i+1}.jpeg`);
+    const interviews = Array.isArray(custom.videos) && custom.videos.length
+      ? custom.videos : Array.from({length:13},(_,i)=>`interview${i+1}.mp4`);
+    const assetPath = (folder,name) => (/^(https?:|data:|\/)/i.test(name) || name.startsWith('assets/'))
+      ? name : `assets/${folder}/${name.split('/').map(encodeURIComponent).join('/')}`;
+
+    // Keep the collage composition fixed, but shuffle which asset lands in each slot.
+    // This makes the overall order feel mixed while preserving the same layout.
+    function seededRandom(seed) {
+      let t = seed >>> 0;
+      return () => {
+        t += 0x6D2B79F5;
+        let r = Math.imul(t ^ (t >>> 15), 1 | t);
+        r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    function shuffleStable(list, seed) {
+      const arr = list.slice();
+      const rand = seededRandom(seed);
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    const allMedia = [
+      ...photos.map((name,i)=>({type:'image',src:assetPath('images',name),name,number:i+1})),
+      ...interviews.map((name,i)=>({type:'video',src:assetPath('videos',name),name,number:i+1}))
+    ];
+    // Each reload chooses a new media arrangement; the slot geometry stays fixed
+    const sessionSeed = (() => {
+      if (globalThis.crypto?.getRandomValues) {
+        const values=new Uint32Array(1);crypto.getRandomValues(values);return values[0];
+      }
+      return Math.floor(Math.random()*0x100000000);
+    })();
+    const media = shuffleStable(allMedia,sessionSeed);
+    media.forEach((item,i)=>{ item.id=i; });
+
+    // Latest official SG Rhizoma Engine: full-screen field + continuous climb
+    // Source: https://sativus-gourd.github.io/rhizoma-smoke/
+    let entered=false, rhizoma=null, rhizomaStarted=false;
+    function initRhizoma() {
+      if(entered || rhizomaStarted || typeof window.SGRhizoma?.grow!=='function')return;
+      rhizomaStarted=true;
+      try {
+        rhizoma=window.SGRhizoma.grow(title, {
+          face:'roses',seed:202,field:true,fixed:true,size:.30,
+          climb:20,seconds:42,colour:'#ffffff',weight:'earthy',dpr:2
+        });
+      } catch(err) {
+        rhizomaStarted=false;
+        console.warn('Rhizoma engine failed, showing plain ROSES text:',err);
+      }
+    }
+    function waitForRhizoma(attempts=0) {
+      if(entered || rhizomaStarted)return;
+      if(typeof window.SGRhizoma?.grow==='function')initRhizoma();
+      else if(attempts<80)setTimeout(()=>waitForRhizoma(attempts+1),100);
+    }
+    if(document.readyState==='loading')
+      document.addEventListener('DOMContentLoaded',()=>waitForRhizoma(),{once:true});
+    else waitForRhizoma();
+
+    let camera=0,target=0,loopWidth=1,geometry=[],visible=new Map();
+    let previousTime=0,pressed=null,draggedRecently=0,activePreview=null;
+    let resumeMusicAfterPreview=false;
+    let backgroundVolumeTarget=MUSIC_VOLUME, audioLastTime=0;
+    const heldArrows=new Set();
+    function openMore(){
+      if(!entered||moreOpen)return;
+      if(moreHideTimer!==null){clearTimeout(moreHideTimer);moreHideTimer=null;}
+      moreOpen=true;heldArrows.clear();stopPreview();
+      moreOverlay.hidden=false;moreOverlay.setAttribute('aria-hidden','false');
+      moreButton.setAttribute('aria-expanded','true');
+      viewport.inert=true;
+      requestAnimationFrame(()=>{moreOverlay.classList.add('is-open');moreClose.focus({preventScroll:true});});
+    }
+    function closeMore(){
+      if(!moreOpen)return;
+      moreOpen=false;moreOverlay.classList.remove('is-open');
+      moreOverlay.setAttribute('aria-hidden','true');
+      moreButton.setAttribute('aria-expanded','false');
+      viewport.inert=false;moreButton.focus({preventScroll:true});
+      moreHideTimer=setTimeout(()=>{if(!moreOpen)moreOverlay.hidden=true;moreHideTimer=null;},380);
+    }
+    moreButton.addEventListener('click',openMore);
+    moreClose.addEventListener('click',closeMore);
+    // Clicking anywhere outside a live external link closes the overlay
+    moreOverlay.addEventListener('click',e=>{
+      if(!e.target.closest('a[href], button'))closeMore();
+    });
+    moreOverlay.addEventListener('keydown',e=>{
+      if(e.key!=='Tab')return;
+      const controls=[...moreOverlay.querySelectorAll('button,a[href]')].filter(el=>!el.disabled);
+      if(controls.length===0)return;
+      const first=controls[0],last=controls[controls.length-1];
+      if(e.shiftKey && document.activeElement===first){e.preventDefault();last.focus();}
+      else if(!e.shiftKey && document.activeElement===last){e.preventDefault();first.focus();}
+    });
+    let brokenImages=0,loadedImages=0;
+    const failedMedia=new Set();
+
+    // Collage model: a full-bleed, irregular mosaic below a layer of overlapping
+    // photographs and interviews. Every source asset is used exactly once.
+    // Fixed pseudo-random values keep the composition stable while scrolling.
+    function randomFor(n, salt=0) {
+      let t=(n + 1) * 0x9E3779B1 + (salt + 11) * 0x85EBCA77;
+      t=Math.imul(t ^ (t >>> 16), 0x7FEB352D);
+      t=Math.imul(t ^ (t >>> 15), 0x846CA68B);
+      return ((t ^ (t >>> 16)) >>> 0) / 4294967296;
+    }
+    function layout() {
+      const vW=innerWidth, vH=innerHeight;
+      const isMobile=vW<=760;
+      // Each refresh reshuffles media into the SAME 96 mosaic + 37 overlay slots
+      // All 13 videos remain on the accessible foreground, but their exact slots change
+      const allPhotos=media.filter(item=>item.type==='image');
+      const allVideos=media.filter(item=>item.type==='video');
+      const background=allPhotos.slice(0,96);
+      const foreground=shuffleStable([...allPhotos.slice(96),...allVideos],sessionSeed ^ 0xB84FA921);
+      // Slightly smaller background mosaic cells (about 15% total): more photos appear
+      // within each viewport while the continuous mosaic still has zero gaps
+      const baseHeight=Math.max(156,Math.min(268,vH*.262));
+      const baseWidth=isMobile ? Math.min(238,baseHeight*1.12) : baseHeight*1.48;
+      loopWidth=Math.max(vW*3.35,background.length*baseWidth*baseHeight/Math.max(1,vH));
+
+      // Random recursive rectangular subdivisions produce a continuous,
+      // zero-gap photomontage without repeated horizontal grid lines.
+      let patches=[{x:0,y:0,w:loopWidth,h:vH}];
+      while(patches.length<background.length){
+        let largest=0,score=-1;
+        patches.forEach((r,i)=>{
+          const weighted=r.w*r.h*(.82+randomFor(i,patches.length+39)*.37);
+          if(weighted>score){score=weighted;largest=i;}
+        });
+        const cell=patches.splice(largest,1)[0];
+        const canSplitX=cell.w>=175,canSplitY=cell.h>=145;
+        let horizontal;
+        if(!canSplitX)horizontal=true;
+        else if(!canSplitY)horizontal=false;
+        else if(cell.w/cell.h>1.42)horizontal=false;
+        else if(cell.h/cell.w>1.35)horizontal=true;
+        else horizontal=randomFor(patches.length,largest+71)<.5;
+        const ratio=.37+randomFor(patches.length,largest+91)*.26;
+        if(horizontal){
+          const h=cell.h*ratio;
+          patches.push({x:cell.x,y:cell.y,w:cell.w,h});
+          patches.push({x:cell.x,y:cell.y+h,w:cell.w,h:cell.h-h});
+        } else {
+          const w=cell.w*ratio;
+          patches.push({x:cell.x,y:cell.y,w,h:cell.h});
+          patches.push({x:cell.x+w,y:cell.y,w:cell.w-w,h:cell.h});
+        }
+      }
+      patches.sort((a,b)=>a.x-b.x || a.y-b.y);
+      const next=background.map((item,i)=>{
+        const r=patches[i];
+        // 2px bleed on each side prevents antialiased hairline gaps between patches
+        return {...item,x:r.x-2,width:r.w+4,y:r.y+r.h/2,height:r.h+4,
+          layer:1+Math.floor(randomFor(i,77)*2)};
+      });
+      // Irregular foreground tiles cross patch borders, with varying aspect,
+      // scale and depth: the reference artwork's densely overlapping effect.
+      foreground.forEach((item,i)=>{
+        const jitter=randomFor(i,201);
+        const x=((i+.10+jitter*.80)/foreground.length)*loopWidth;
+        const width=isMobile
+          ? Math.min(vW*.75,185+randomFor(i,203)*Math.min(130,vW*.24))
+          : Math.max(250,Math.min(610, vH*(.28+randomFor(i,203)*.38)));
+        const height=isMobile
+          ? Math.min(vH*.52,200+randomFor(i,209)*190)
+          : Math.max(190,Math.min(vH*.60,vH*(.27+randomFor(i,209)*.35)));
+        // Only photos shrink; interview videos retain their current dimensions
+        const photoScale=item.type==='image' ? .85 : 1;
+        const finalWidth=width*photoScale,finalHeight=height*photoScale;
+        const y=finalHeight/2+randomFor(i,207)*Math.max(0,vH-finalHeight);
+        next.push({...item,x,width:finalWidth,height:finalHeight,y,
+          layer:item.type==='video' ? 25+Math.floor(randomFor(i,213)*5)
+                                    : 10+Math.floor(randomFor(i,213)*10)});
+      });
+      geometry=next;
+      visible.forEach(el=>el.remove());visible.clear();
+      placeVisible();
+      if(!entered)preloadFirstScreen();
+    }
+    // Image and video frames keep their real proportions while covering every grid cell
+    // The underlying slot grid is fixed; only content changes on refresh
+    const mediaRatios=new Map();
+    const preloadedFirstScreen=new Set();
+    function preloadFirstScreen() {
+      const candidates=geometry.filter(item=>item.type==='image' &&
+        item.x<innerWidth*1.12 && item.x+item.width>=0);
+      for(const item of candidates.slice(0,28)) {
+        if(preloadedFirstScreen.has(item.src))continue;
+        preloadedFirstScreen.add(item.src);
+        const img=new Image();img.decoding='async';img.onload=()=>{if(img.naturalHeight)mediaRatios.set(item.src,img.naturalWidth/img.naturalHeight);};img.src=item.src;
+      }
+    }
+    function bounded(x) {return ((x%loopWidth)+loopWidth)%loopWidth;}
+    function placeVisible() {
+      if(!entered) return;
+      const position=bounded(camera), buffer=Math.min(520,innerWidth*.46);
+      const keep=new Set();
+      for (const item of geometry) {
+        if(failedMedia.has(item.id))continue;
+        let left=item.x-position;
+        if(left+item.width< -buffer) left+=loopWidth;
+        if(left>innerWidth+buffer) left-=loopWidth;
+        if(left+item.width< -buffer || left>innerWidth+buffer) continue;
+        keep.add(item.id);
+        let el=visible.get(item.id);
+        if(!el){el=makeTile(item);visible.set(item.id,el);stage.appendChild(el);}
+        let displayWidth=item.width,displayHeight=item.height;
+        const ratio=mediaRatios.get(item.src);
+        if(ratio>0){
+          // COVER the entire allocated rectangle with an unwarped full image
+          // Overflow can extend beyond neighbors and outside the screen
+          if(displayWidth/displayHeight<ratio)displayWidth=displayHeight*ratio;
+          else displayHeight=displayWidth/ratio;
+        }
+        el.style.left=(left+(item.width-displayWidth)/2)+'px';
+        el.style.top=item.y+'px';
+        el.style.width=displayWidth+'px';
+        el.style.height=displayHeight+'px';
+      }
+      for(const [id,el] of visible) {
+        if(keep.has(id))continue;
+        if(el===activePreview)stopPreview(false);
+        el.remove();visible.delete(id);
+      }
+    }
+    function makeTile(item) {
+      const tile=document.createElement('div');
+      tile.className='tile '+(item.type==='video'?'interview':'photo');
+      if(item.type==='video') tile.tabIndex=0;
+      tile.dataset.id=item.id;
+      if(item.type==='video')tile.setAttribute('aria-label',
+        `Interview ${item.number}. ${canHover?'Hover or focus':'Tap'} to listen.`);
+      tile.style.zIndex=String(item.layer||1);
+      if(item.type==='image') {
+        const image=document.createElement('img');
+        image.loading='eager';image.decoding='async';image.draggable=false;image.alt='';
+        if(item.x<innerWidth*1.1)image.fetchPriority='high';
+        image.src=item.src;
+        image.onload=()=>{loadedImages++;if(image.naturalHeight)mediaRatios.set(item.src,image.naturalWidth/image.naturalHeight);tile.classList.add('is-loaded');};
+        image.onerror=()=>{
+          brokenImages++;
+          // Never remove an underlying mosaic cell: it must continue covering its slot
+          if(item.layer<=2){tile.classList.add('is-failed');maybeWarn();return;}
+          failedMedia.add(item.id);tile.remove();visible.delete(item.id);maybeWarn();
+        };
+        tile.append(image);
+      } else {
+        const video=document.createElement('video');
+        video.src=item.src;video.muted=true;video.defaultMuted=true;video.loop=true;
+        video.playsInline=true;video.setAttribute('playsinline','');video.preload='metadata';
+        video.setAttribute('aria-hidden','true');
+        // Show a still frame even before the visitor hovers to play.
+        video.addEventListener('loadedmetadata',()=>{
+          if(video.videoHeight)mediaRatios.set(item.src,video.videoWidth/video.videoHeight);
+          if(Number.isFinite(video.duration) && video.duration > .15){
+            try{video.currentTime=Math.min(.15,video.duration*.08)}catch{}
+          }
+        },{once:true});
+        video.addEventListener('error',()=>{
+          if(activePreview===tile) stopPreview(tile);
+          failedMedia.add(item.id);tile.remove();visible.delete(item.id);
+        });
+        tile.append(video);
+        if(canHover){
+          tile.addEventListener('pointerenter',()=>startPreview(tile));
+          tile.addEventListener('pointerleave',()=>stopPreview(tile));
+          // Keyboard users can listen on focus; no interview click or modal action.
+          tile.addEventListener('focus',()=>startPreview(tile));
+          tile.addEventListener('blur',()=>stopPreview(tile));
+        } else {
+          // Touchscreens have no hover. Tapping toggles playback in the tile,
+          // never opens a fullscreen player.
+          tile.addEventListener('pointerup',()=>{
+            if(pressed?.drag || performance.now()-draggedRecently<330)return;
+            if(activePreview===tile)stopPreview(tile);
+            else startPreview(tile);
+          });
+        }
+      }
+      return tile;
+    }
+    function maybeWarn(){
+      if(brokenImages>=3 && loadedImages===0 && !custom.images){
+        assetWarning.innerHTML='이미지를 찾지 못했어요.<br><code>assets/images/Frame-1.jpeg</code> 부터 확인해 주세요.<br>파일명이 다르면 <code>assets/manifest.js</code> 에 실제 파일명을 지정하면 됩니다.';
+        assetWarning.hidden=false;
+      }
+    }
+    function tick(t) {
+      const dt=Math.min(3, (t-previousTime)/16.67||1);previousTime=t;
+      camera+=(target-camera)*(1-Math.pow(.83,dt));
+      if(target>loopWidth*4||target< -loopWidth*4) {
+        const cycles=Math.trunc(target/loopWidth);
+        const shift=cycles*loopWidth;target-=shift;camera-=shift;
+      }
+      // Arrow keys move smoothly while held.
+      if(entered && heldArrows.size){
+        const direction=(heldArrows.has('ArrowRight')?1:0)-(heldArrows.has('ArrowLeft')?1:0);
+        if(direction)move(direction*12*dt);
+      }
+      if(entered)placeVisible();
+      // Audio ducking: ~0.6s fade-down / ~0.9s recovery, with no abrupt cuts.
+      // Frame-rate independent smoothing follows a new hover target immediately.
+      const elapsedMs=Math.min(80, Math.max(0,(t-(audioLastTime||t))));
+      audioLastTime=t;
+      const fadeMs=backgroundVolumeTarget<soundtrack.volume?250:380;
+      const f=1-Math.exp(-elapsedMs/fadeMs);
+      soundtrack.volume += (backgroundVolumeTarget-soundtrack.volume)*f;
+      if(Math.abs(soundtrack.volume-backgroundVolumeTarget)<.002)
+        soundtrack.volume=backgroundVolumeTarget;
+      if(activePreview){
+        const video=activePreview.querySelector('video');
+        if(video){
+          const vf=1-Math.exp(-elapsedMs/170);
+          video.volume=Math.min(INTERVIEW_VOLUME,video.volume+(INTERVIEW_VOLUME-video.volume)*vf);
+        }
+      }
+      requestAnimationFrame(tick);
+    }
+    function move(delta){target+=delta;}
+    viewport.addEventListener('wheel',e=>{
+      if(!entered)return;e.preventDefault();
+      const d=Math.abs(e.deltaX)>Math.abs(e.deltaY)?e.deltaX:e.deltaY;
+      move(d*(e.deltaMode===1?25:1.05));
+    },{passive:false});
+    viewport.addEventListener('pointerdown',e=>{
+      if(!entered||(e.pointerType==='mouse'&&e.button!==0))return;
+      pressed={id:e.pointerId,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,drag:false};
+    });
+    viewport.addEventListener('pointermove',e=>{
+      if(!pressed||pressed.id!==e.pointerId)return;
+      const dx=e.clientX-pressed.lastX,dy=e.clientY-pressed.lastY;
+      if(!pressed.drag && Math.hypot(e.clientX-pressed.x,e.clientY-pressed.y)>8){
+        pressed.drag=true;viewport.classList.add('dragging');
+        try{viewport.setPointerCapture(e.pointerId)}catch{}
+        stopPreview(false);
+      }
+      if(pressed.drag)move(Math.abs(dx)>Math.abs(dy)?-dx:-dy);
+      pressed.lastX=e.clientX;pressed.lastY=e.clientY;
+    });
+    function releasePointer(e){
+      if(!pressed||e.pointerId!==pressed.id)return;
+      if(pressed.drag)draggedRecently=performance.now();
+      pressed=null;viewport.classList.remove('dragging');
+      try{if(viewport.hasPointerCapture(e.pointerId))viewport.releasePointerCapture(e.pointerId)}catch{}
+    }
+    viewport.addEventListener('pointerup',releasePointer);
+    viewport.addEventListener('pointercancel',releasePointer);
+
+    // Hover gradually ducks the Roses soundtrack instead of pausing it.
+    // The interview fades in and plays at its original size; leaving restores
+    // the soundtrack smoothly at its current playback position.
+    // Safari may reject unmuted hover autoplay: then return to Roses volume.
+    function startPreview(tile){
+      if(!entered||pressed?.drag||activePreview===tile)return;
+      if(activePreview)stopPreview(activePreview,false);
+      const video=tile.querySelector('video');if(!video)return;
+      activePreview=tile;
+      resumeMusicAfterPreview=!soundtrack.paused;
+      backgroundVolumeTarget=DUCKED_VOLUME;
+      video.muted=false;
+      video.volume=0;
+      try { video.currentTime=0; } catch {}
+      const playAttempt=video.play();
+      if(playAttempt && typeof playAttempt.then==='function') {
+        playAttempt.then(()=>{
+          if(activePreview===tile)tile.classList.add('is-playing');
+          else video.pause();
+        }).catch(err=>{
+          console.info('Interview sound was blocked by browser autoplay policy:',err);
+          if(activePreview===tile)stopPreview(tile);
+        });
+      } else tile.classList.add('is-playing');
+    }
+    function stopPreview(tile=null,restoreMusic=true){
+      if(!activePreview || (tile&&tile!==activePreview))return;
+      const previous=activePreview;activePreview=null;
+      const video=previous.querySelector('video');
+      if(video){video.pause();video.muted=true;try{video.currentTime=0}catch{}}
+      previous.classList.remove('is-playing');
+      // Music was never paused by hover, so simply fade its volume back up.
+      if(restoreMusic){
+        backgroundVolumeTarget=MUSIC_VOLUME;
+        resumeMusicAfterPreview=false;
+      }
+    }
+    document.addEventListener('keydown',e=>{
+      if(e.key==='Escape'){heldArrows.clear();if(moreOpen){e.preventDefault();closeMore();return;}stopPreview();return;}
+      if(moreOpen)return;
+      // The intro's ENTER key uses the same audio-permitted interaction as a click.
+      if(!entered && e.key==='Enter' && !e.repeat && !e.altKey && !e.ctrlKey && !e.metaKey){
+        e.preventDefault();enterExperience();return;
+      }
+      if(!entered||e.altKey||e.ctrlKey||e.metaKey)return;
+      if(e.target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName||''))return;
+      // Space toggles the Roses soundtrack throughout the collage.
+      // If an interview is currently previewing, stop it first so audio never overlaps.
+      if(e.code==='Space' || e.key===' '){
+        e.preventDefault();
+        if(e.repeat)return;
+        if(activePreview) stopPreview();
+        if(soundtrack.paused) soundtrack.play().catch(()=>{});
+        else soundtrack.pause();
+        return;
+      }
+      if(e.key!=='ArrowRight'&&e.key!=='ArrowLeft')return;
+      e.preventDefault();
+      if(!heldArrows.has(e.key))move(e.key==='ArrowRight'?110:-110);
+      heldArrows.add(e.key);
+    });
+    document.addEventListener('keyup',e=>{heldArrows.delete(e.key);});
+    window.addEventListener('blur',()=>heldArrows.clear());
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)heldArrows.clear();});
+
+    soundtrack.volume=MUSIC_VOLUME;
+    function enterExperience(){
+      if(entered)return;
+      entered=true;
+      // Stop the official engine and withdraw its roots during the entry fade
+      try { rhizoma?.stop?.();rhizoma?.release?.({seconds:.8})?.catch?.(()=>{}); } catch {}
+      experience.inert=false;experience.classList.add('visible');
+      entry.classList.add('leaving');
+      // Synchronous from click/Enter so the browser allows soundtrack audio.
+      soundtrack.play().catch(err=>console.info('Audio did not start:',err));
+      placeVisible();
+      viewport.focus({preventScroll:true});
+      setTimeout(()=>{entry.hidden=true;rhizoma?.remove?.();},1000);
+    }
+    enter.addEventListener('click',enterExperience);
+    let pendingResize;
+    addEventListener('resize',()=>{
+      clearTimeout(pendingResize);pendingResize=setTimeout(()=>{
+        layout();
+      },120);
+    });
+    layout();requestAnimationFrame(tick);
+  })();
+  </script>
+</body>
+</html>
