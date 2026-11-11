@@ -29,12 +29,20 @@
     button:focus-visible { outline:2px solid currentColor;outline-offset:4px }
     [hidden] { display:none!important }
 
-    /* Multiply keeps the original white Rhizoma growth intact while punching its
-       exact letter/root shapes through the black intro to the live photo collage. */
-    .entry { position:fixed;inset:0;z-index:40;display:grid;place-items:center;
-      overflow:hidden;background:#000;color:#fff;mix-blend-mode:multiply;
-      transition:opacity .8s ease,visibility .8s ease }
-    .entry.leaving { opacity:0;visibility:hidden;pointer-events:none }
+    /* Frame-1 is visible ONLY through the white Rhizoma shapes. Fade the
+       entire composition as one layer after release, so the full photo is
+       never exposed and never scales up separately. */
+    .intro-shell { position:fixed;inset:0;z-index:40;overflow:hidden;
+      background:#000;isolation:isolate;opacity:1;
+      transition:opacity 1.45s cubic-bezier(.22,.6,.25,1) }
+    .intro-shell.leaving { opacity:0;pointer-events:none }
+    .intro-photo { position:absolute;inset:0;z-index:1;overflow:hidden;
+      background:#000;pointer-events:none }
+    .intro-photo img { display:block;width:100%;height:100%;object-fit:cover;
+      object-position:center }
+    /* Multiply retains the official engine's shapes as a window onto Frame-1. */
+    .entry { position:absolute;inset:0;z-index:2;display:grid;place-items:center;
+      overflow:hidden;background:#000;color:#fff;mix-blend-mode:multiply }
     .entry-center { position:relative;width:100%;height:100%;display:grid;place-items:center }
     /* The current Rhizoma field engine owns the full screen, not an extra hand-drawn canvas */
     .entry-title { position:absolute;inset:0;z-index:1;margin:0;padding:0;
@@ -49,7 +57,18 @@
       background:#000;pointer-events:none;opacity:1;
       transition:opacity 4s cubic-bezier(.25,.46,.25,1) }
     .entry.reveal-engine .entry-center::after { opacity:0 }
-    .entry-hit { position:absolute;inset:0;z-index:5;border:0;background:transparent;color:#fff }
+    .entry-hit { position:absolute;inset:0;z-index:5;border:0;background:transparent;color:#fff;
+      cursor:pointer }
+    /* The instruction sits ABOVE the multiply-blended engine, not inside it.
+       Otherwise multiply can turn even white text dark or nearly invisible. */
+    .entry-prompt { position:absolute;z-index:5;bottom:clamp(27px,4vh,50px);
+      left:0;right:0;text-align:center;font-size:12px;line-height:1.5;
+      font-weight:400;letter-spacing:.14em;text-transform:none;
+      color:rgb(255 255 255 / 70%);opacity:0;
+      pointer-events:none;transition:opacity 1.2s ease;
+      text-shadow:0 1px 3px rgba(0,0,0,.35) }
+    .entry.reveal-engine + .entry-prompt { opacity:1 }
+    .entry.releasing + .entry-prompt { opacity:0 }
     .entry-hit:focus-visible { outline:2px solid #fff;outline-offset:-13px }
 
     /* Keep the entire viewport filled, including while image files are loading */
@@ -198,12 +217,18 @@
   </style>
 </head>
 <body>
-  <section class="entry" id="entry" aria-label="Roses opening">
-    <div class="entry-center">
-      <h1 class="entry-title" id="rosesTitle">ROSES</h1>
-      <button class="entry-hit" id="enter" aria-label="Enter Roses experience" type="button"></button>
+  <div class="intro-shell" id="introShell">
+    <div class="intro-photo" id="introPhoto" aria-hidden="true">
+      <img id="introPhotoImage" src="assets/images/Frame-1.jpeg" alt="" fetchpriority="high" decoding="async">
     </div>
-  </section>
+    <section class="entry" id="entry" aria-label="Roses opening">
+      <div class="entry-center">
+        <h1 class="entry-title" id="rosesTitle">ROSES</h1>
+        <button class="entry-hit" id="enter" aria-label="Click to release ROSES and enter" type="button"></button>
+      </div>
+    </section>
+    <span class="entry-prompt" aria-hidden="true">click to release</span>
+  </div>
 
   <main class="experience" id="experience" aria-label="Roses audiovisual collage" inert>
     <div class="viewport" id="viewport" tabindex="0" aria-label="Horizontal infinite gallery. Scroll, drag, or press the left and right arrow keys to explore">
@@ -265,6 +290,7 @@
     'use strict';
     const get = id => document.getElementById(id);
     const entry = get('entry'), title = get('rosesTitle'), enter = get('enter');
+    const introShell=get('introShell'), introPhotoImage=get('introPhotoImage');
     const experience = get('experience'), viewport = get('viewport'), stage = get('stage');
     const soundtrack = get('soundtrack');
     const assetWarning = get('assetWarning');
@@ -274,7 +300,8 @@
     let photoDetailOpen=false,photoDetailFocusReturn=null,photoDetailHideTimer=null;
     function openPhotoDetail(item){
       if(!entered || creditsOpen || photoDetailOpen)return;
-      pauseAutoScroll();
+      // Enlargement does not pause the moving collage behind the photograph.
+      autoScrollResumeAt=0;
       if(photoDetailHideTimer!==null){clearTimeout(photoDetailHideTimer);photoDetailHideTimer=null;}
       photoDetailFocusReturn=visible.get(item.id) || null;
       heldArrows.clear();stopPreview();
@@ -290,7 +317,8 @@
     }
     function closePhotoDetail(){
       if(!photoDetailOpen)return;
-      pauseAutoScroll();
+      // Keep the ambient camera moving seamlessly after the detail closes.
+      autoScrollResumeAt=0;
       photoDetailOpen=false;
       photoDetailOverlay.classList.remove('is-open');
       photoDetailOverlay.setAttribute('aria-hidden','true');
@@ -348,6 +376,9 @@
       ? custom.videos : Array.from({length:13},(_,i)=>`interview${i+1}.mp4`);
     const assetPath = (folder,name) => (/^(https?:|data:|\/)/i.test(name) || name.startsWith('assets/'))
       ? name : `assets/${folder}/${name.split('/').map(encodeURIComponent).join('/')}`;
+    // Use the actual Frame-1 file from the manifest if its extension differs.
+    const firstFrame=photos.find(name=>/(^|\/)Frame[-_ ]?0?1\.(?:jpe?g|png|webp|avif)$/i.test(name)) || 'Frame-1.jpeg';
+    introPhotoImage.src=assetPath('images',firstFrame);
 
     // Asset shuffling is repeatable per strip, while each new strip is different.
     function seededRandom(seed) {
@@ -385,7 +416,7 @@
 
     // Latest official SG Rhizoma Engine: full-screen field + continuous climb
     // Source: https://sativus-gourd.github.io/rhizoma-smoke/
-    let entered=false, rhizoma=null, rhizomaStarted=false;
+    let entered=false, entering=false, rhizoma=null, rhizomaStarted=false;
     function revealOpeningEngine(){
       // Let the engine paint before fading out the black opening curtain.
       requestAnimationFrame(()=>requestAnimationFrame(()=>{
@@ -404,7 +435,11 @@
         rhizomaStarted=false;
         console.warn('Rhizoma engine failed, showing plain ROSES text:',err);
       }
-      revealOpeningEngine();
+      // The controller's ready promise resolves after its first painted frame.
+      // Only then begin the long black-to-engine reveal.
+      if(rhizoma?.ready?.then)
+        rhizoma.ready.then(revealOpeningEngine, revealOpeningEngine);
+      else revealOpeningEngine();
     }
     function waitForRhizoma(attempts=0) {
       if(entered || rhizomaStarted)return;
@@ -943,7 +978,7 @@
       const dt=Math.min(3,frameMs/16.67)||1;previousTime=t;
       // Hovering and ordinary clicks never pause the ambient rightward scroll.
       // Only actual dragging, manual scrolling, keyboard movement or dialogs do.
-      if(entered && t>=autoScrollResumeAt && !creditsOpen && !photoDetailOpen &&
+      if(entered && t>=autoScrollResumeAt && !creditsOpen &&
          !pressed?.drag && heldArrows.size===0 && !document.hidden){
         move(AUTO_SCROLL_PX_PER_SECOND*frameMs/1000);
       }
@@ -1098,21 +1133,44 @@
       soundtrack.play().catch(err=>console.info('Soundtrack repeat blocked:',err));
     });
     soundtrack.volume=MUSIC_VOLUME;
-    function enterExperience(){
-      if(entered)return;
-      entered=true;
-      // Begin moving the collage immediately on the very first entrance click.
-      // Do not apply the manual-input idle delay to the entry interaction.
-      autoScrollResumeAt=0;
-      // Stop the official engine and withdraw its roots during the entry fade
-      try { rhizoma?.stop?.();rhizoma?.release?.({seconds:.8})?.catch?.(()=>{}); } catch {}
-      experience.inert=false;experience.classList.add('visible');
-      entry.classList.add('leaving');
-      // Synchronous from click/Enter so the browser allows soundtrack audio.
+    async function enterExperience(){
+      if(entered || entering)return;
+      entering=true;
+      entry.classList.add('releasing');
+      enter.disabled=true; // Ignore extra clicks while the roots withdraw.
+
+      // Start the soundtrack inside the user's click gesture to satisfy browser
+      // playback policies; keep it inaudible until the collage begins to appear.
+      backgroundVolumeTarget=0;
+      soundtrack.volume=0;
       soundtrack.play().catch(err=>console.info('Audio did not start:',err));
+
+      // Follow the official SG Rhizoma v1.0 example: stop the climb, then await
+      // the FULL release. The intro must remain visible until release finishes.
+      try {
+        if(rhizoma && typeof rhizoma.release==='function'){
+          rhizoma.stop?.();
+          await rhizoma.release({seconds:1.4});
+        }
+      } catch(err) {
+        console.warn('Rhizoma release could not finish; entering collage:',err);
+      }
+
+      // Release finished: dissolve the WHOLE intro into the moving collage.
+      // The Frame-1 image stays inside the Rhizoma cutouts until it disappears;
+      // it is never enlarged or revealed as a full-screen image.
+      entered=true;
+      autoScrollResumeAt=0;
+      experience.inert=false;
+      experience.classList.add('visible');
+      backgroundVolumeTarget=MUSIC_VOLUME;
       placeVisible();
+      introShell.classList.add('leaving');
       viewport.focus({preventScroll:true});
-      setTimeout(()=>{entry.hidden=true;rhizoma?.remove?.();},1000);
+      setTimeout(()=>{
+        introShell.hidden=true;
+        try { rhizoma?.remove?.(); } catch {}
+      },1500);
     }
     enter.addEventListener('click',enterExperience);
     let pendingResize;
